@@ -6,6 +6,8 @@ unittest.mock gemockt. Die Tests decken Erfolgs- und Fehlerpfade ab.
 """
 
 import base64
+import datetime
+import json
 import os
 
 import pytest
@@ -434,7 +436,8 @@ class TestProcessMessages:
                 with patch("consumer.wait_for_task", return_value=(True, None)):
                     with patch("consumer.mark_as_read") as mock_read:
                         with patch("consumer.move_message") as mock_move:
-                            consumer.process_messages("token", "src", "done-id", "err-id")
+                            with patch("consumer._log_import_result"):
+                                consumer.process_messages("token", "src", "done-id", "err-id")
 
         mock_read.assert_called_once_with("token", "msg-1")
         mock_move.assert_called_once_with("token", "msg-1", "done-id")
@@ -452,7 +455,8 @@ class TestProcessMessages:
                 with patch("consumer.wait_for_task", return_value=(False, "duplicate document")):
                     with patch("consumer.mark_as_read") as mock_read:
                         with patch("consumer.move_message") as mock_move:
-                            consumer.process_messages("token", "src", "done-id", "err-id")
+                            with patch("consumer._log_import_result"):
+                                consumer.process_messages("token", "src", "done-id", "err-id")
 
         mock_read.assert_called_once_with("token", "msg-2")
         mock_move.assert_called_once_with("token", "msg-2", "err-id")
@@ -469,7 +473,8 @@ class TestProcessMessages:
             with patch("consumer.upload_to_paperless") as mock_upload:
                 with patch("consumer.mark_as_read") as mock_read:
                     with patch("consumer.move_message") as mock_move:
-                        consumer.process_messages("token", "src", "done-id", "err-id")
+                        with patch("consumer._log_import_result"):
+                            consumer.process_messages("token", "src", "done-id", "err-id")
 
         mock_upload.assert_not_called()
         mock_read.assert_not_called()
@@ -487,7 +492,8 @@ class TestProcessMessages:
             with patch("consumer.upload_to_paperless", side_effect=Exception("Verbindungsfehler")):
                 with patch("consumer.mark_as_read") as mock_read:
                     with patch("consumer.move_message") as mock_move:
-                        consumer.process_messages("token", "src", "done-id", "err-id")
+                        with patch("consumer._log_import_result"):
+                            consumer.process_messages("token", "src", "done-id", "err-id")
 
         mock_read.assert_called_once_with("token", "msg-4")
         mock_move.assert_called_once_with("token", "msg-4", "err-id")
@@ -508,7 +514,8 @@ class TestProcessMessages:
                 with patch("consumer.wait_for_task", return_value=(True, None)):
                     with patch("consumer.mark_as_read") as mock_read:
                         with patch("consumer.move_message") as mock_move:
-                            consumer.process_messages("token", "src", "done-id", "err-id")
+                            with patch("consumer._log_import_result"):
+                                consumer.process_messages("token", "src", "done-id", "err-id")
 
         # Nur einmal verschoben, trotz zweier Anhänge
         mock_move.assert_called_once_with("token", "msg-5", "done-id")
@@ -533,7 +540,8 @@ class TestProcessMessages:
                 ):
                     with patch("consumer.mark_as_read"):
                         with patch("consumer.move_message") as mock_move:
-                            consumer.process_messages("token", "src", "done-id", "err-id")
+                            with patch("consumer._log_import_result"):
+                                consumer.process_messages("token", "src", "done-id", "err-id")
 
         mock_move.assert_called_once_with("token", "msg-6", "err-id")
 
@@ -548,7 +556,8 @@ class TestProcessMessages:
         with patch("consumer.get_messages", return_value=[msg]):
             with patch("consumer.mark_as_read") as mock_read:
                 with patch("consumer.move_message") as mock_move:
-                    consumer.process_messages("token", "src", "done-id", "err-id")
+                    with patch("consumer._log_import_result"):
+                        consumer.process_messages("token", "src", "done-id", "err-id")
 
         mock_read.assert_not_called()
         mock_move.assert_not_called()
@@ -574,8 +583,389 @@ class TestProcessMessages:
                 ):
                     with patch("consumer.mark_as_read"):
                         with patch("consumer.move_message") as mock_move:
-                            consumer.process_messages("token", "src", "done-id", "err-id")
+                            with patch("consumer._log_import_result"):
+                                consumer.process_messages("token", "src", "done-id", "err-id")
 
         assert mock_move.call_count == 2
         mock_move.assert_any_call("token", "msg-ok", "done-id")
         mock_move.assert_any_call("token", "msg-fail", "err-id")
+
+    def test_log_import_bei_erfolg_aufgerufen(self):
+        """_log_import_result wird für erfolgreich verarbeitete Anhänge aufgerufen."""
+        msg = {
+            "id": "msg-log-ok",
+            "subject": "Rechnung Q1",
+            "attachments": [_make_attachment("rechnung.pdf")],
+        }
+
+        with patch("consumer.get_messages", return_value=[msg]):
+            with patch("consumer.upload_to_paperless", return_value="task-x"):
+                with patch("consumer.wait_for_task", return_value=(True, None)):
+                    with patch("consumer.mark_as_read"):
+                        with patch("consumer.move_message"):
+                            with patch("consumer._log_import_result") as mock_log:
+                                consumer.process_messages("token", "src", "done", "err")
+
+        mock_log.assert_called_once()
+        eintrag = mock_log.call_args[0][0]
+        assert eintrag["datei"] == "rechnung.pdf"
+        assert eintrag["betreff"] == "Rechnung Q1"
+        assert eintrag["status"] == "erfolgreich"
+        assert eintrag["fehler"] is None
+
+    def test_log_import_bei_fehler_aufgerufen(self):
+        """_log_import_result wird für fehlgeschlagene Anhänge mit Fehlermeldung aufgerufen."""
+        msg = {
+            "id": "msg-log-fail",
+            "subject": "Duplikat-Mail",
+            "attachments": [_make_attachment("duplikat.pdf")],
+        }
+
+        with patch("consumer.get_messages", return_value=[msg]):
+            with patch("consumer.upload_to_paperless", return_value="task-y"):
+                with patch("consumer.wait_for_task", return_value=(False, "duplicate document")):
+                    with patch("consumer.mark_as_read"):
+                        with patch("consumer.move_message"):
+                            with patch("consumer._log_import_result") as mock_log:
+                                consumer.process_messages("token", "src", "done", "err")
+
+        mock_log.assert_called_once()
+        eintrag = mock_log.call_args[0][0]
+        assert eintrag["datei"] == "duplikat.pdf"
+        assert eintrag["status"] == "fehlerhaft"
+        assert "duplicate" in eintrag["fehler"]
+
+    def test_log_import_bei_upload_exception(self):
+        """Exception beim Upload erzeugt einen Log-Eintrag mit Fehlermeldung."""
+        msg = {
+            "id": "msg-log-exc",
+            "subject": "Netzwerkfehler",
+            "attachments": [_make_attachment("datei.pdf")],
+        }
+
+        with patch("consumer.get_messages", return_value=[msg]):
+            with patch("consumer.upload_to_paperless", side_effect=Exception("Timeout")):
+                with patch("consumer.mark_as_read"):
+                    with patch("consumer.move_message"):
+                        with patch("consumer._log_import_result") as mock_log:
+                            consumer.process_messages("token", "src", "done", "err")
+
+        mock_log.assert_called_once()
+        eintrag = mock_log.call_args[0][0]
+        assert eintrag["status"] == "fehlerhaft"
+        assert "Timeout" in eintrag["fehler"]
+
+
+# ---------------------------------------------------------------------------
+# graph_send_mail
+# ---------------------------------------------------------------------------
+
+
+class TestGraphSendMail:
+    def test_sendet_korrekte_mail_struktur(self):
+        """graph_send_mail sendet den korrekten Payload an die sendMail-Endpoint."""
+        mock_response = MagicMock()
+        mock_response.status_code = 202
+
+        with patch("requests.post", return_value=mock_response) as mock_post:
+            consumer.graph_send_mail("token", "empfaenger@test.de", "Betreff", "<p>Inhalt</p>")
+
+        mock_post.assert_called_once()
+        url = mock_post.call_args.args[0]
+        assert "sendMail" in url
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["message"]["subject"] == "Betreff"
+        assert payload["message"]["body"]["contentType"] == "HTML"
+        assert payload["message"]["body"]["content"] == "<p>Inhalt</p>"
+        assert payload["message"]["toRecipients"][0]["emailAddress"]["address"] == "empfaenger@test.de"
+
+    def test_raise_bei_http_fehler(self):
+        """graph_send_mail wirft Exception bei HTTP-Fehler."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = Exception("HTTP 403")
+
+        with patch("requests.post", return_value=mock_response):
+            with pytest.raises(Exception, match="HTTP 403"):
+                consumer.graph_send_mail("token", "x@y.de", "Betreff", "<p>x</p>")
+
+    def test_auth_header_wird_gesetzt(self):
+        """graph_send_mail setzt den Authorization-Header korrekt."""
+        mock_response = MagicMock()
+
+        with patch("requests.post", return_value=mock_response) as mock_post:
+            consumer.graph_send_mail("mein-token", "x@y.de", "Betreff", "<p>x</p>")
+
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer mein-token"
+
+
+# ---------------------------------------------------------------------------
+# _build_summary_html
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSummaryHtml:
+    def test_enthaelt_datum(self):
+        """HTML enthält das übergebene Datum."""
+        html = consumer._build_summary_html([], [], "01.04.2026")
+        assert "01.04.2026" in html
+
+    def test_enthaelt_anzahl_erfolgreich(self):
+        """HTML zeigt die korrekte Anzahl erfolgreich importierter Dateien."""
+        erfolgreich = [{"datei": "a.pdf", "betreff": "S", "zeitpunkt": "01.04.2026 09:00"}]
+        html = consumer._build_summary_html(erfolgreich, [], "01.04.2026")
+        assert "a.pdf" in html
+
+    def test_enthaelt_fehler_details(self):
+        """HTML zeigt Dateiname und Fehlermeldung für fehlgeschlagene Importe."""
+        fehlerhaft = [
+            {"datei": "fehler.pdf", "betreff": "S", "fehler": "duplicate document", "zeitpunkt": "01.04.2026 10:00"}
+        ]
+        html = consumer._build_summary_html([], fehlerhaft, "01.04.2026")
+        assert "fehler.pdf" in html
+        assert "duplicate document" in html
+
+    def test_leere_stats_zeigt_keine_eintraege(self):
+        """HTML mit leeren Listen enthält 'keine'-Platzhalter."""
+        html = consumer._build_summary_html([], [], "01.04.2026")
+        assert "keine" in html
+
+
+# ---------------------------------------------------------------------------
+# send_daily_summary
+# ---------------------------------------------------------------------------
+
+
+class TestSendDailySummary:
+    def test_versendet_mail_an_summary_recipient(self):
+        """Sendet die Zusammenfassung an SUMMARY_RECIPIENT wenn gesetzt."""
+        with patch("consumer._read_log_entries", return_value=([], [])):
+            with patch("consumer._log_import_result"):
+                with patch("consumer.graph_send_mail") as mock_send:
+                    with patch.object(consumer, "SUMMARY_RECIPIENT", "chef@firma.de"):
+                        consumer.send_daily_summary("token")
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args.args[1] == "chef@firma.de"
+
+    def test_faellt_auf_user_email_zurueck(self):
+        """Sendet an USER_EMAIL wenn SUMMARY_RECIPIENT nicht gesetzt (None)."""
+        with patch("consumer._read_log_entries", return_value=([], [])):
+            with patch("consumer._log_import_result"):
+                with patch("consumer.graph_send_mail") as mock_send:
+                    with patch.object(consumer, "SUMMARY_RECIPIENT", None):
+                        consumer.send_daily_summary("token")
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args.args[1] == consumer.USER_EMAIL
+
+    def test_betreff_enthaelt_datum(self):
+        """Betreff der Zusammenfassungs-Mail enthält das heutige Datum."""
+        heute = datetime.date.today().strftime("%d.%m.%Y")
+
+        with patch("consumer._read_log_entries", return_value=([], [])):
+            with patch("consumer._log_import_result"):
+                with patch("consumer.graph_send_mail") as mock_send:
+                    consumer.send_daily_summary("token")
+
+        betreff = mock_send.call_args.args[2]
+        assert heute in betreff
+
+    def test_schreibt_summary_sentinel_in_log(self):
+        """Nach dem Versand wird ein summary_gesendet-Eintrag in die Log-Datei geschrieben."""
+        with patch("consumer._read_log_entries", return_value=([], [])):
+            with patch("consumer.graph_send_mail"):
+                with patch("consumer._log_import_result") as mock_log:
+                    consumer.send_daily_summary("token")
+
+        eintrag = mock_log.call_args.args[0]
+        assert eintrag["typ"] == "summary_gesendet"
+        assert eintrag["datum"] == datetime.date.today().isoformat()
+
+    def test_wirft_exception_bei_send_fehler(self):
+        """Wirft Exception wenn graph_send_mail fehlschlägt."""
+        with patch("consumer._read_log_entries", return_value=([], [])):
+            with patch("consumer._log_import_result"):
+                with patch("consumer.graph_send_mail", side_effect=Exception("Senderfehler")):
+                    with pytest.raises(Exception, match="Senderfehler"):
+                        consumer.send_daily_summary("token")
+
+
+# ---------------------------------------------------------------------------
+# _log_import_result
+# ---------------------------------------------------------------------------
+
+
+class TestLogImportResult:
+    def test_schreibt_json_zeile_in_datei(self, tmp_path):
+        """Schreibt den Eintrag als gültiges JSON in eine neue Datei."""
+        logfile = tmp_path / "import.log"
+        eintrag = {"typ": "import", "ts": "2026-04-01T09:05:00", "datei": "test.pdf", "status": "erfolgreich"}
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            consumer._log_import_result(eintrag)
+
+        lines = logfile.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0]) == eintrag
+
+    def test_haengt_mehrere_zeilen_an(self, tmp_path):
+        """Mehrere Aufrufe erzeugen mehrere Zeilen (append-Modus)."""
+        logfile = tmp_path / "import.log"
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            consumer._log_import_result({"typ": "import", "datei": "a.pdf"})
+            consumer._log_import_result({"typ": "import", "datei": "b.pdf"})
+
+        lines = logfile.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 2
+
+    def test_fehler_wird_geloggt_nicht_ausgeloest(self, caplog):
+        """Bei nicht beschreibbarem Pfad wird der Fehler geloggt, keine Exception geworfen."""
+        import logging
+        with caplog.at_level(logging.ERROR, logger="consumer"):
+            with patch.object(consumer, "IMPORT_LOG_FILE", "/nicht/existierender/pfad/import.log"):
+                consumer._log_import_result({"typ": "import"})
+
+        assert "Fehler" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# _read_log_entries
+# ---------------------------------------------------------------------------
+
+
+class TestReadLogEntries:
+    def test_leere_datei_gibt_leere_listen(self, tmp_path):
+        """Leere Log-Datei ergibt zwei leere Listen."""
+        logfile = tmp_path / "import.log"
+        logfile.write_text("", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert erfolgreich == []
+        assert fehlerhaft == []
+
+    def test_nicht_vorhandene_datei_gibt_leere_listen(self, tmp_path):
+        """Fehlende Log-Datei ergibt zwei leere Listen ohne Exception."""
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(tmp_path / "nichtda.log")):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert erfolgreich == []
+        assert fehlerhaft == []
+
+    def test_liest_erfolgreich_eintraege(self, tmp_path):
+        """Erfolgreich-Einträge werden korrekt in die erste Liste übernommen."""
+        logfile = tmp_path / "import.log"
+        eintrag = {
+            "typ": "import", "ts": "2026-04-01T09:05:00",
+            "datei": "ok.pdf", "betreff": "Test", "status": "erfolgreich", "fehler": None,
+        }
+        logfile.write_text(json.dumps(eintrag) + "\n", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert len(erfolgreich) == 1
+        assert erfolgreich[0]["datei"] == "ok.pdf"
+        assert fehlerhaft == []
+
+    def test_liest_fehlerhaft_eintraege(self, tmp_path):
+        """Fehlerhaft-Einträge werden korrekt in die zweite Liste übernommen."""
+        logfile = tmp_path / "import.log"
+        eintrag = {
+            "typ": "import", "ts": "2026-04-01T10:00:00",
+            "datei": "fail.pdf", "betreff": "Test", "status": "fehlerhaft", "fehler": "duplicate",
+        }
+        logfile.write_text(json.dumps(eintrag) + "\n", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert fehlerhaft[0]["fehler"] == "duplicate"
+        assert erfolgreich == []
+
+    def test_filtert_andere_daten_heraus(self, tmp_path):
+        """Einträge anderer Tage werden nicht in die Ergebnislisten übernommen."""
+        logfile = tmp_path / "import.log"
+        zeilen = [
+            json.dumps({"typ": "import", "ts": "2026-04-01T09:00:00", "datei": "heute.pdf", "status": "erfolgreich", "fehler": None}),
+            json.dumps({"typ": "import", "ts": "2026-03-31T09:00:00", "datei": "gestern.pdf", "status": "erfolgreich", "fehler": None}),
+        ]
+        logfile.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert len(erfolgreich) == 1
+        assert erfolgreich[0]["datei"] == "heute.pdf"
+
+    def test_ignoriert_summary_eintraege(self, tmp_path):
+        """summary_gesendet-Einträge werden nicht in die Import-Listen übernommen."""
+        logfile = tmp_path / "import.log"
+        logfile.write_text(json.dumps({"typ": "summary_gesendet", "datum": "2026-04-01"}) + "\n", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert erfolgreich == []
+        assert fehlerhaft == []
+
+    def test_ignoriert_ungueltiges_json(self, tmp_path):
+        """Zeilen mit ungültigem JSON werden ohne Exception übersprungen."""
+        logfile = tmp_path / "import.log"
+        logfile.write_text("kein json hier\n", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            erfolgreich, fehlerhaft = consumer._read_log_entries("2026-04-01")
+
+        assert erfolgreich == []
+
+
+# ---------------------------------------------------------------------------
+# _get_last_summary_date
+# ---------------------------------------------------------------------------
+
+
+class TestGetLastSummaryDate:
+    def test_gibt_none_zurueck_wenn_datei_fehlt(self, tmp_path):
+        """Gibt None zurück wenn die Log-Datei noch nicht existiert."""
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(tmp_path / "nichtda.log")):
+            assert consumer._get_last_summary_date() is None
+
+    def test_gibt_none_zurueck_ohne_summary_eintrag(self, tmp_path):
+        """Gibt None zurück wenn nur Import-Einträge, aber kein summary_gesendet vorhanden."""
+        logfile = tmp_path / "import.log"
+        logfile.write_text(
+            json.dumps({"typ": "import", "ts": "2026-04-01T09:00:00"}) + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            assert consumer._get_last_summary_date() is None
+
+    def test_gibt_letztes_summary_datum_zurueck(self, tmp_path):
+        """Gibt das Datum des letzten summary_gesendet-Eintrags zurück."""
+        logfile = tmp_path / "import.log"
+        zeilen = [
+            json.dumps({"typ": "summary_gesendet", "datum": "2026-03-31"}),
+            json.dumps({"typ": "summary_gesendet", "datum": "2026-04-01"}),
+        ]
+        logfile.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            result = consumer._get_last_summary_date()
+
+        assert result == datetime.date(2026, 4, 1)
+
+    def test_ignoriert_ungueltiges_datum(self, tmp_path):
+        """Einträge mit ungültigem Datumsformat werden ohne Exception übersprungen."""
+        logfile = tmp_path / "import.log"
+        logfile.write_text(
+            json.dumps({"typ": "summary_gesendet", "datum": "kein-datum"}) + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(consumer, "IMPORT_LOG_FILE", str(logfile)):
+            assert consumer._get_last_summary_date() is None
