@@ -1,0 +1,16 @@
+[Unit]
+Description=Paperless Mail Consumer
+After=network.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oliver
+WorkingDirectory=/opt/paperless-consumer
+ExecStart=/usr/bin/python3 /opt/paperless-consumer/consumer.py
+Restart=on-failure
+RestartSec=30
+EnvironmentFile=/opt/paperless-consumer/.env
+
+[Install]
+WantedBy=multi-user.target
