@@ -1,0 +1,42 @@
+services:
+  paperless-consumer:
+    build:
+      context: .
+      network: host
+    container_name: paperless-consumer
+    restart: unless-stopped
+
+    # Uncomment and set your VM hostname if Paperless-ngx runs on the Docker host
+    # extra_hosts:
+    #   - "<VM-HOSTNAME>:host-gateway"
+
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
+    env_file:
+      - .env
+
+    environment:
+      # Override log file path for container
+      - IMPORT_LOG_FILE=/app/data/import.log
+
+    volumes:
+      - ./data:/app/data:rw
+
+    user: "1000:1000"
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
