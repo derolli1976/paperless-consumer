@@ -26,14 +26,27 @@ nano .env
 
 Trage deine Daten ein (siehe [Konfiguration](#konfiguration)).
 
-### 2. Container starten
+### 2. Lokale Docker-Compose-Anpassungen (optional)
+
+Falls Paperless-ngx auf demselben Host läuft und per Hostname erreichbar sein muss:
+
+```bash
+cp docker-compose.override.example.yml docker-compose.override.yml
+nano docker-compose.override.yml
+# <VM-HOSTNAME> durch den tatsächlichen Hostnamen der VM ersetzen
+```
+
+Diese Datei wird von Docker Compose automatisch geladen und ist gitignored – ein
+`git pull` überschreibt sie nie.
+
+### 3. Container starten
 
 ```bash
 docker compose build
 docker compose up -d
 ```
 
-### 3. Logs prüfen
+### 4. Logs prüfen
 
 ```bash
 docker compose logs -f
@@ -85,6 +98,7 @@ Alle Einstellungen in `.env` – siehe `.env.example` für alle verfügbaren Var
 > **Hinweis:** `PAPERLESS_URL` muss aus dem Container erreichbar sein. Falls Paperless-ngx
 > ebenfalls auf derselben VM als Docker-Container läuft, die IP des Docker-Hosts oder das
 > Docker-Netzwerk nutzen (z.B. `http://host.docker.internal:8000` oder `http://<VM-IP>:8000`).
+> Alternativ den Hostnamen per `docker-compose.override.yml` auflösbar machen (siehe Schritt 2).
 
 ## Container-Befehle
 

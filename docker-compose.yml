@@ -6,10 +6,6 @@ services:
     container_name: paperless-consumer
     restart: unless-stopped
 
-    # Uncomment and set your VM hostname if Paperless-ngx runs on the Docker host
-    # extra_hosts:
-    #   - "<VM-HOSTNAME>:host-gateway"
-
     dns:
       - 8.8.8.8
       - 1.1.1.1

@@ -1,0 +1,11 @@
+# Local overrides for docker-compose.yml
+# Copy this file to docker-compose.override.yml and adjust to your environment.
+# Docker Compose automatically merges docker-compose.override.yml with docker-compose.yml.
+# This file is NOT tracked by git.
+
+services:
+  paperless-consumer:
+    # Map the VM hostname to the Docker host gateway so the container can
+    # reach services (e.g. Paperless-ngx) running on the host by hostname.
+    extra_hosts:
+      - "<VM-HOSTNAME>:host-gateway"

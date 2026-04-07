@@ -40,3 +40,5 @@ README.md
 test_consumer.py
 .env.example
 docker-compose.yml
+docker-compose.override.yml
+docker-compose.override.example.yml

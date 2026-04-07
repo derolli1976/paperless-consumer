@@ -36,6 +36,7 @@ Das Repository liegt in einer privaten **Git**-Instanz. Es ist nicht öffentlich
 ├── test_consumer.py                 # Tests (pytest)
 ├── Dockerfile                       # Container-Image Definition
 ├── docker-compose.yml               # Docker Compose Konfiguration
+├── docker-compose.override.example.yml  # Vorlage für lokale Overrides
 ├── .dockerignore                    # Dateien die nicht ins Image gehören
 ├── requirements.txt                 # Python-Abhängigkeiten mit Versionen
 ├── data/                            # Volume-Mount für import.log (nicht im Repo)
