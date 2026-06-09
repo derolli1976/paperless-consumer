@@ -366,6 +366,121 @@ class TestWaitForTask:
 
 
 # ---------------------------------------------------------------------------
+# _is_retryable_error
+# ---------------------------------------------------------------------------
+
+
+class TestIsRetryableError:
+    def test_none_ist_nicht_retrybar(self):
+        """None (no error) is not retryable."""
+        assert consumer._is_retryable_error(None) is False
+
+    def test_duplikat_ist_nicht_retrybar(self):
+        """Duplicates are permanent failures and must not be retried."""
+        assert consumer._is_retryable_error("duplicate document found") is False
+
+    def test_worker_lost_ist_retrybar(self):
+        """An OOM-killed worker (WorkerLostError/SIGKILL) is retryable."""
+        error = (
+            "billiard.exceptions.WorkerLostError: Worker exited prematurely: "
+            "signal 9 (SIGKILL) Job: 353."
+        )
+        assert consumer._is_retryable_error(error) is True
+
+    def test_timeout_ist_retrybar(self):
+        """A timeout is a transient failure and is retryable."""
+        assert consumer._is_retryable_error("Timeout after 120s") is True
+
+    def test_unbekannter_fehler_ist_nicht_retrybar(self):
+        """An unknown/permanent error is not retried."""
+        assert consumer._is_retryable_error("some other error") is False
+
+
+# ---------------------------------------------------------------------------
+# upload_with_retry
+# ---------------------------------------------------------------------------
+
+
+class TestUploadWithRetry:
+    def test_erfolg_beim_ersten_versuch(self):
+        """Returns (True, None) and uploads only once when the task succeeds."""
+        with patch.object(consumer, "upload_to_paperless", return_value="task-1") as mock_upload:
+            with patch.object(consumer, "wait_for_task", return_value=(True, None)):
+                with patch("time.sleep"):
+                    success, error = consumer.upload_with_retry(
+                        "doc.pdf", b"bytes", "application/pdf"
+                    )
+
+        assert success is True
+        assert error is None
+        assert mock_upload.call_count == 1
+
+    def test_transienter_fehler_dann_erfolg(self):
+        """Retries on a WorkerLostError and succeeds on the second attempt."""
+        worker_lost = "WorkerLostError: Worker exited prematurely: signal 9 (SIGKILL)"
+        with patch.object(consumer, "upload_to_paperless", side_effect=["t1", "t2"]) as mock_upload:
+            with patch.object(
+                consumer, "wait_for_task", side_effect=[(False, worker_lost), (True, None)]
+            ):
+                with patch("time.sleep"):
+                    with patch.object(consumer, "UPLOAD_RETRIES", 3):
+                        success, error = consumer.upload_with_retry(
+                            "doc.pdf", b"bytes", "application/pdf"
+                        )
+
+        assert success is True
+        assert error is None
+        assert mock_upload.call_count == 2
+
+    def test_duplikat_wird_nicht_wiederholt(self):
+        """A duplicate failure is returned immediately without retrying."""
+        with patch.object(consumer, "upload_to_paperless", return_value="t1") as mock_upload:
+            with patch.object(
+                consumer, "wait_for_task", return_value=(False, "duplicate document found")
+            ):
+                with patch("time.sleep"):
+                    with patch.object(consumer, "UPLOAD_RETRIES", 3):
+                        success, error = consumer.upload_with_retry(
+                            "doc.pdf", b"bytes", "application/pdf"
+                        )
+
+        assert success is False
+        assert "duplicate" in error
+        assert mock_upload.call_count == 1
+
+    def test_transienter_fehler_erschoepft_alle_versuche(self):
+        """Returns (False, error) after exhausting all retries on persistent OOM kills."""
+        worker_lost = "WorkerLostError: signal 9 (SIGKILL)"
+        with patch.object(consumer, "upload_to_paperless", return_value="t1") as mock_upload:
+            with patch.object(consumer, "wait_for_task", return_value=(False, worker_lost)):
+                with patch("time.sleep"):
+                    with patch.object(consumer, "UPLOAD_RETRIES", 2):
+                        success, error = consumer.upload_with_retry(
+                            "doc.pdf", b"bytes", "application/pdf"
+                        )
+
+        assert success is False
+        assert "SIGKILL" in error
+        # initial attempt + 2 retries
+        assert mock_upload.call_count == 3
+
+    def test_exception_beim_upload_wird_abgefangen(self):
+        """An exception during upload is caught; non-retryable -> single attempt."""
+        with patch.object(
+            consumer, "upload_to_paperless", side_effect=Exception("HTTP 500")
+        ) as mock_upload:
+            with patch("time.sleep"):
+                with patch.object(consumer, "UPLOAD_RETRIES", 3):
+                    success, error = consumer.upload_with_retry(
+                        "doc.pdf", b"bytes", "application/pdf"
+                    )
+
+        assert success is False
+        assert "HTTP 500" in error
+        assert mock_upload.call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # mark_as_read / move_message
 # ---------------------------------------------------------------------------
 

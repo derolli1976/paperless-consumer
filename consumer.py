@@ -26,6 +26,10 @@ INBOX_TAG_ID    = int(os.getenv("INBOX_TAG_ID", "2"))
 POLL_INTERVAL      = int(os.getenv("POLL_INTERVAL", "300"))
 TASK_TIMEOUT       = int(os.getenv("TASK_TIMEOUT", "120"))
 TASK_INTERVAL      = int(os.getenv("TASK_INTERVAL", "3"))
+# Number of additional attempts for transient Paperless failures (e.g. the OCR
+# worker being OOM-killed -> WorkerLostError/SIGKILL) and the delay between them.
+UPLOAD_RETRIES     = int(os.getenv("UPLOAD_RETRIES", "3"))
+RETRY_DELAY        = int(os.getenv("RETRY_DELAY", "10"))
 SUMMARY_HOUR       = int(os.getenv("SUMMARY_HOUR", "9"))
 SUMMARY_RECIPIENT  = os.getenv("SUMMARY_RECIPIENT")
 IMPORT_LOG_FILE    = os.getenv("IMPORT_LOG_FILE", "/app/data/import.log")
@@ -238,6 +242,62 @@ def wait_for_task(task_id):
             elapsed += TASK_INTERVAL
 
     return False, f"Timeout after {TASK_TIMEOUT}s"
+
+
+def _is_retryable_error(error):
+    """
+    Returns True if a Paperless task error is transient and worth retrying.
+
+    Transient errors are usually caused by the Paperless worker being killed
+    (e.g. out-of-memory during OCR -> SIGKILL/WorkerLostError) or by a timeout,
+    rather than by a real problem with the document such as a duplicate.
+    """
+    if not error:
+        return False
+    text = str(error).lower()
+    # Duplicates are permanent failures and must never be retried
+    if "duplicate" in text:
+        return False
+    retryable_markers = (
+        "workerlosterror",
+        "worker exited prematurely",
+        "signal 9",
+        "sigkill",
+        "worker lost",
+        "timeout",
+    )
+    return any(marker in text for marker in retryable_markers)
+
+
+def upload_with_retry(filename, file_bytes, content_type):
+    """
+    Uploads a document to Paperless and waits for the task, retrying transient
+    failures (e.g. an OOM-killed worker) up to UPLOAD_RETRIES times.
+
+    Returns (True, None) on success or (False, error_message) on final failure.
+    Permanent failures (e.g. duplicates) are returned immediately without retry.
+    """
+    last_error = None
+    for attempt in range(UPLOAD_RETRIES + 1):
+        if attempt > 0:
+            log.info(
+                f"  Retry {attempt}/{UPLOAD_RETRIES} for '{filename}' "
+                f"in {RETRY_DELAY}s (previous error: {last_error})"
+            )
+            time.sleep(RETRY_DELAY)
+        try:
+            task_id = upload_to_paperless(filename, file_bytes, content_type)
+            log.info(f"  Uploaded: '{filename}' -> task {task_id}")
+            success, error = wait_for_task(task_id)
+            if success:
+                return True, None
+            last_error = error or "Unknown"
+        except Exception as e:
+            last_error = str(e)
+        # Stop early on permanent (non-retryable) failures
+        if not _is_retryable_error(last_error):
+            return False, last_error
+    return False, last_error
 
 
 def _write_log_entry(entry):
@@ -585,35 +645,20 @@ def process_messages(token, source_folder_id, done_folder_id, error_folder_id):
                     })
                     continue
 
-            try:
-                task_id = upload_to_paperless(filename, file_bytes, content_type)
-                log.info(f"  Uploaded: '{filename}' -> task {task_id}")
-
-                success, error = wait_for_task(task_id)
-                if success:
-                    log.info(f"  Task completed successfully: '{filename}'")
-                    uploaded += 1
-                    _write_log_entry({
-                        "type": "import",
-                        "ts": datetime.datetime.now(BERLIN).isoformat(timespec="seconds"),
-                        "file": filename,
-                        "subject": subject,
-                        "status": "success",
-                        "error": None,
-                    })
-                else:
-                    log.warning(f"  Task failed for '{filename}': {error}")
-                    failed += 1
-                    _write_log_entry({
-                        "type": "import",
-                        "ts": datetime.datetime.now(BERLIN).isoformat(timespec="seconds"),
-                        "file": filename,
-                        "subject": subject,
-                        "status": "failed",
-                        "error": error or "Unknown",
-                    })
-            except Exception as e:
-                log.error(f"  Error uploading '{filename}': {e}")
+            success, error = upload_with_retry(filename, file_bytes, content_type)
+            if success:
+                log.info(f"  Task completed successfully: '{filename}'")
+                uploaded += 1
+                _write_log_entry({
+                    "type": "import",
+                    "ts": datetime.datetime.now(BERLIN).isoformat(timespec="seconds"),
+                    "file": filename,
+                    "subject": subject,
+                    "status": "success",
+                    "error": None,
+                })
+            else:
+                log.warning(f"  Task failed for '{filename}': {error}")
                 failed += 1
                 _write_log_entry({
                     "type": "import",
@@ -621,7 +666,7 @@ def process_messages(token, source_folder_id, done_folder_id, error_folder_id):
                     "file": filename,
                     "subject": subject,
                     "status": "failed",
-                    "error": str(e),
+                    "error": error or "Unknown",
                 })
 
         # Move message based on outcome

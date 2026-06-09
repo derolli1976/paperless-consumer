@@ -71,6 +71,8 @@ IMPORT_LOG_FILE=/app/data/import.log
 
 | Variable | Beschreibung | Default |
 |---|---|---|
+| `UPLOAD_RETRIES` | Anzahl zusätzlicher Versuche bei transienten Paperless-Fehlern (z.B. OOM-getöteter OCR-Worker / `SIGKILL`) | `3` |
+| `RETRY_DELAY` | Wartezeit zwischen Wiederholungsversuchen in Sekunden | `10` |
 | `SUMMARY_HOUR` | Uhrzeit (Stunde, 0–23, Europe/Berlin) für den täglichen E-Mail-Versand | `9` |
 | `SUMMARY_RECIPIENT` | Empfänger der Zusammenfassung (leer = `USER_EMAIL`) | – |
 | `IMPORT_LOG_FILE` | Pfad zur JSON-Lines Log-Datei für Import-Ergebnisse | `/app/data/import.log` |
@@ -192,6 +194,7 @@ ssh user@<VM-HOST> "cd /opt/paperless-consumer && git pull && docker compose up 
 
 - `post_document` gibt immer HTTP 200 zurück, auch wenn das Dokument später als Duplikat erkannt wird. Den eigentlichen Status erst über den Task-Endpoint abfragen.
 - Duplikat-Fehler erscheinen als `FAILURE` im Task mit "duplicate" in der `result` Property.
+- Transiente Paperless-Fehler (OOM-getöteter OCR-Worker: `WorkerLostError` / `signal 9` / `SIGKILL` sowie Timeouts) werden in `upload_with_retry()` automatisch bis zu `UPLOAD_RETRIES`-mal mit `RETRY_DELAY` Sekunden Pause wiederholt. Permanente Fehler wie Duplikate werden über `_is_retryable_error()` erkannt und sofort ohne Wiederholung als fehlgeschlagen behandelt.
 - Der konfigurierte Outlook-Ordner kann ein Unterordner von `Posteingang` sein, nicht zwingend Top-Level. Die Funktion `get_folder_id()` durchsucht deshalb auch alle Unterordner.
 - Anhänge sind in der Graph API base64-kodiert und müssen vor dem Upload dekodiert werden.
 - Die tägliche Zusammenfassung wird einmal pro Tag versendet. Der Versand-Status wird als `summary_sent`-Sentinel in der Log-Datei persistiert und überlebt damit auch Neustarts des Dienstes.

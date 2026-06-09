@@ -91,6 +91,8 @@ Alle Einstellungen in `.env` – siehe `.env.example` für alle verfügbaren Var
 | `POLL_INTERVAL` | Abfrageintervall in Sekunden | `300` |
 | `TASK_TIMEOUT` | Timeout für Paperless-Task in Sekunden | `120` |
 | `TASK_INTERVAL` | Abfrageintervall für Task-Status in Sekunden | `3` |
+| `UPLOAD_RETRIES` | Anzahl zusätzlicher Versuche bei transienten Paperless-Fehlern (z.B. OOM-getöteter OCR-Worker / `SIGKILL`) | `3` |
+| `RETRY_DELAY` | Wartezeit zwischen Wiederholungsversuchen in Sekunden | `10` |
 | `SUMMARY_HOUR` | Uhrzeit (Stunde, 0–23, Europe/Berlin) für den täglichen E-Mail-Versand | `9` |
 | `SUMMARY_RECIPIENT` | Empfänger der Zusammenfassung (leer = `USER_EMAIL`) | – |
 | `IMPORT_LOG_FILE` | Pfad zur JSON-Lines Log-Datei | `/app/data/import.log` |
