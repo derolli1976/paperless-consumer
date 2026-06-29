@@ -17,7 +17,7 @@ Der Dienst läuft als **Docker-Container** auf einer Ubuntu-VM, auf der Paperles
 - Markiert verarbeitete Mails als gelesen
 - Legt die Unterordner `verarbeitet` und `fehlerhaft` automatisch an, falls nicht vorhanden
 - Protokolliert alle Import-Ergebnisse in einer JSON-Lines Log-Datei (`import.log`)
-- Versendet täglich zu einer konfigurierbaren Uhrzeit eine HTML-Zusammenfassung per E-Mail mit Übersicht über erfolgreiche und fehlgeschlagene Importe
+- Versendet täglich zu einer konfigurierbaren Uhrzeit eine HTML-Zusammenfassung per E-Mail mit Übersicht über erfolgreiche und fehlgeschlagene Importe sowie eine Sektion mit den Dokumenten, die aktuell noch die Paperless-INBOX-Tag (`INBOX_TAG_ID`) tragen
 - Alle Zeitangaben in deutscher Zeitzone (Europe/Berlin)
 
 ---
@@ -188,6 +188,7 @@ ssh user@<VM-HOST> "cd /opt/paperless-consumer && git pull && docker compose up 
 - Relevante Endpoints:
   - `POST /api/documents/post_document/` – Dokument hochladen, gibt Task-UUID zurück
   - `GET /api/tasks/?task_id={uuid}` – Task-Status abfragen
+  - `GET /api/documents/?tags__id__all={INBOX_TAG_ID}` – Dokumente mit INBOX-Tag abfragen (für die tägliche Zusammenfassung, paginiert)
   - Task-Status-Werte: `PENDING`, `STARTED`, `SUCCESS`, `FAILURE`
 
 ### Bekannte Eigenheiten
@@ -200,3 +201,4 @@ ssh user@<VM-HOST> "cd /opt/paperless-consumer && git pull && docker compose up 
 - Die tägliche Zusammenfassung wird einmal pro Tag versendet. Der Versand-Status wird als `summary_sent`-Sentinel in der Log-Datei persistiert und überlebt damit auch Neustarts des Dienstes.
 - Das Import-Log (`import.log`) verwendet JSON-Lines-Format: pro Zeile ein JSON-Objekt mit `type`, `ts`, `file`, `subject`, `status` (`success`/`failed`), `error`.
 - `_read_log_entries_since_last_summary()` liest alle Import-Einträge nach dem letzten `summary_sent`-Sentinel, unabhängig vom Datum. Damit werden auch Importe erfasst, die nach dem letzten Versand am Vortag noch eingegangen sind.
+- Die Zusammenfassung enthält eine Sektion mit allen Paperless-Dokumenten, die noch den INBOX-Tag (`INBOX_TAG_ID`) tragen. `get_inbox_documents()` ruft diese über `/api/documents/?tags__id__all={INBOX_TAG_ID}` ab, folgt der Paginierung und verlinkt jedes Dokument. Fehler beim Abruf blockieren den Versand der Zusammenfassung nicht.

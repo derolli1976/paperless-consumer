@@ -430,6 +430,35 @@ def _get_last_summary_date():
     return last
 
 
+def get_inbox_documents():
+    """
+    Fetches all documents currently tagged with the Paperless INBOX tag.
+    Returns a list of dicts with title, created date and document URL.
+    """
+    headers = {"Authorization": f"Token {PAPERLESS_TOKEN}"}
+    documents = []
+    url = f"{PAPERLESS_URL}/api/documents/?tags__id__all={INBOX_TAG_ID}&ordering=-created"
+    # Follow pagination until all documents are collected
+    while url:
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        for doc in data.get("results", []):
+            try:
+                created = datetime.datetime.fromisoformat(
+                    doc["created"].replace("Z", "+00:00")
+                ).astimezone(BERLIN).strftime("%d.%m.%Y %H:%M")
+            except (ValueError, KeyError):
+                created = doc.get("created", "")
+            documents.append({
+                "title": doc.get("title", "(ohne Titel)"),
+                "created": created,
+                "url": f"{PAPERLESS_URL}/documents/{doc.get('id')}/details",
+            })
+        url = data.get("next")
+    return documents
+
+
 def graph_send_mail(token, to_address, subject, html_body):
     """Sends an email via the Graph API (sendMail). Returns no body."""
     payload = {
@@ -489,10 +518,12 @@ def _analyze_pending_messages(token, folder_id):
     return pending
 
 
-def _build_summary_html(succeeded, failed, date_display, pending=None):
+def _build_summary_html(succeeded, failed, date_display, pending=None, inbox=None):
     """Builds the HTML body of the daily summary email (content in German)."""
     if pending is None:
         pending = []
+    if inbox is None:
+        inbox = []
 
     def rows(entries, fields):
         if not entries:
@@ -513,6 +544,30 @@ def _build_summary_html(succeeded, failed, date_display, pending=None):
                 <th style='padding:4px 8px;border:1px solid #ddd;text-align:left'>Grund</th>
             </tr></thead>
             <tbody>{rows(pending, ['subject','sender','reason'])}</tbody>
+        </table>
+        """
+
+    inbox_section = ""
+    if inbox:
+        inbox_rows = ""
+        for d in inbox:
+            title = d.get("title", "")
+            url = d.get("url", "")
+            title_cell = f"<a href='{url}'>{title}</a>" if url else title
+            inbox_rows += (
+                "<tr>"
+                f"<td style='padding:4px 8px;border:1px solid #ddd'>{title_cell}</td>"
+                f"<td style='padding:4px 8px;border:1px solid #ddd'>{d.get('created','')}</td>"
+                "</tr>"
+            )
+        inbox_section = f"""
+        <h3 style='color:#1565c0;margin-top:24px'>Dokumente in der Paperless-INBOX ({len(inbox)})</h3>
+        <table style='border-collapse:collapse;width:100%'>
+            <thead><tr style='background:#e3f2fd'>
+                <th style='padding:4px 8px;border:1px solid #ddd;text-align:left'>Titel</th>
+                <th style='padding:4px 8px;border:1px solid #ddd;text-align:left'>Erstellt</th>
+            </tr></thead>
+            <tbody>{inbox_rows}</tbody>
         </table>
         """
 
@@ -545,6 +600,7 @@ def _build_summary_html(succeeded, failed, date_display, pending=None):
         <tbody>{rows(failed, ['file','subject','error','timestamp'])}</tbody>
     </table>
     {pending_section}
+    {inbox_section}
     </body></html>
     """
     return html
@@ -570,14 +626,20 @@ def send_daily_summary(token, folder_id=None):
             pending = _analyze_pending_messages(token, folder_id)
         except Exception as e:
             log.error(f"Error analyzing pending messages: {e}")
-    html = _build_summary_html(succeeded, failed, date_display, pending)
+    # Fetch documents still sitting in the Paperless INBOX
+    inbox = []
+    try:
+        inbox = get_inbox_documents()
+    except Exception as e:
+        log.error(f"Error fetching Paperless INBOX documents: {e}")
+    html = _build_summary_html(succeeded, failed, date_display, pending, inbox)
     graph_send_mail(token, recipient, subject_line, html)
     # Write sentinel so service restarts detect today's send
     _write_log_entry({"type": "summary_sent", "date": today.isoformat()})
     log.info(
         f"Daily summary sent to {recipient}: "
         f"{len(succeeded)} succeeded, {len(failed)} failed, "
-        f"{len(pending)} pending in folder."
+        f"{len(pending)} pending in folder, {len(inbox)} in Paperless INBOX."
     )
 
 

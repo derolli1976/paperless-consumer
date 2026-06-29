@@ -12,7 +12,7 @@ Python-Dienst, der ein Microsoft 365 Postfach überwacht und Anhänge automatisc
 - Markiert verarbeitete Mails als gelesen
 - Legt Unterordner automatisch an, falls nicht vorhanden
 - Protokolliert alle Import-Ergebnisse in einer JSON-Lines Log-Datei (`import.log`)
-- Versendet täglich eine HTML-Zusammenfassung per E-Mail (konfigurierbare Uhrzeit)
+- Versendet täglich eine HTML-Zusammenfassung per E-Mail (konfigurierbare Uhrzeit) – inkl. einer Übersicht der Dokumente, die aktuell noch in der Paperless-INBOX liegen
 - Alle Zeitangaben in deutscher Zeitzone (Europe/Berlin)
 
 ## Quick Start (Docker)

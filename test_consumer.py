@@ -864,6 +864,25 @@ class TestBuildSummaryHtml:
         html = consumer._build_summary_html([], [], "01.04.2026")
         assert "Nicht verarbeitete Mails" not in html
 
+    def test_inbox_table_shown_when_inbox(self):
+        """HTML contains the Paperless INBOX table when inbox documents exist."""
+        inbox = [{"title": "Rechnung März", "created": "01.04.2026 08:00", "url": "http://pl/documents/5/details"}]
+        html = consumer._build_summary_html([], [], "01.04.2026", inbox=inbox)
+        assert "Dokumente in der Paperless-INBOX" in html
+        assert "Rechnung März" in html
+        assert "01.04.2026 08:00" in html
+        assert "http://pl/documents/5/details" in html
+
+    def test_inbox_table_hidden_when_empty(self):
+        """HTML does not contain the INBOX section when no inbox documents exist."""
+        html = consumer._build_summary_html([], [], "01.04.2026", inbox=[])
+        assert "Dokumente in der Paperless-INBOX" not in html
+
+    def test_inbox_default_none_hides_section(self):
+        """HTML does not contain the INBOX section when inbox is omitted."""
+        html = consumer._build_summary_html([], [], "01.04.2026")
+        assert "Dokumente in der Paperless-INBOX" not in html
+
 
 # ---------------------------------------------------------------------------
 # send_daily_summary
@@ -943,6 +962,32 @@ class TestSendDailySummary:
         assert "Ohne Anhang" in html_body
         assert "Kein Anhang gefunden" in html_body
 
+    def test_inbox_documents_included_in_html(self):
+        """Paperless INBOX documents are passed to the HTML builder."""
+        inbox = [{"title": "Rechnung", "created": "01.04.2026 08:00", "url": "http://pl/documents/9/details"}]
+
+        with patch("consumer._read_log_entries_since_last_summary", return_value=([], [])):
+            with patch("consumer._analyze_pending_messages", return_value=[]):
+                with patch("consumer.get_inbox_documents", return_value=inbox):
+                    with patch("consumer._write_log_entry"):
+                        with patch("consumer.graph_send_mail") as mock_send:
+                            consumer.send_daily_summary("token", "folder-id")
+
+        html_body = mock_send.call_args.args[3]
+        assert "Dokumente in der Paperless-INBOX" in html_body
+        assert "Rechnung" in html_body
+
+    def test_inbox_fetch_error_does_not_block_summary(self):
+        """An error in get_inbox_documents does not prevent the summary from being sent."""
+        with patch("consumer._read_log_entries_since_last_summary", return_value=([], [])):
+            with patch("consumer._analyze_pending_messages", return_value=[]):
+                with patch("consumer.get_inbox_documents", side_effect=Exception("Paperless error")):
+                    with patch("consumer._write_log_entry"):
+                        with patch("consumer.graph_send_mail") as mock_send:
+                            consumer.send_daily_summary("token", "folder-id")
+
+        mock_send.assert_called_once()
+
     def test_no_folder_id_skips_pending_analysis(self):
         """When folder_id is not provided, pending analysis is skipped."""
         with patch("consumer._read_log_entries_since_last_summary", return_value=([], [])):
@@ -962,6 +1007,55 @@ class TestSendDailySummary:
                         consumer.send_daily_summary("token", "folder-id")
 
         mock_send.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# get_inbox_documents
+# ---------------------------------------------------------------------------
+
+
+class TestGetInboxDocuments:
+    def test_returns_documents(self):
+        """Returns title, formatted created date and details URL for each document."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [
+                {"id": 5, "title": "Rechnung", "created": "2026-04-01T08:00:00+00:00"},
+            ],
+            "next": None,
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("requests.get", return_value=mock_response):
+            with patch.object(consumer, "PAPERLESS_URL", "http://pl"):
+                docs = consumer.get_inbox_documents()
+
+        assert len(docs) == 1
+        assert docs[0]["title"] == "Rechnung"
+        assert docs[0]["url"] == "http://pl/documents/5/details"
+
+    def test_empty_inbox(self):
+        """Returns an empty list when no documents carry the inbox tag."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"results": [], "next": None}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("requests.get", return_value=mock_response):
+            assert consumer.get_inbox_documents() == []
+
+    def test_follows_pagination(self):
+        """Follows the 'next' link until all pages are collected."""
+        page1 = MagicMock()
+        page1.json.return_value = {"results": [{"id": 1, "title": "A", "created": "2026-04-01T08:00:00+00:00"}], "next": "http://pl/api/documents/?page=2"}
+        page1.raise_for_status = MagicMock()
+        page2 = MagicMock()
+        page2.json.return_value = {"results": [{"id": 2, "title": "B", "created": "2026-04-01T09:00:00+00:00"}], "next": None}
+        page2.raise_for_status = MagicMock()
+
+        with patch("requests.get", side_effect=[page1, page2]):
+            docs = consumer.get_inbox_documents()
+
+        assert len(docs) == 2
 
 
 # ---------------------------------------------------------------------------
