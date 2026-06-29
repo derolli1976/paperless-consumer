@@ -21,6 +21,9 @@ TENANT_ID       = os.getenv("AZURE_TENANT_ID")
 USER_EMAIL      = os.getenv("USER_EMAIL")
 PAPERLESS_URL   = os.getenv("PAPERLESS_URL")
 PAPERLESS_TOKEN = os.getenv("PAPERLESS_TOKEN")
+# Public base URL used for document links in the summary email (e.g. reverse
+# proxy address). Falls back to PAPERLESS_URL when not set.
+PAPERLESS_PUBLIC_URL = os.getenv("PAPERLESS_PUBLIC_URL") or PAPERLESS_URL
 MAIL_FOLDER     = os.getenv("MAIL_FOLDER")
 INBOX_TAG_ID    = int(os.getenv("INBOX_TAG_ID", "2"))
 POLL_INTERVAL      = int(os.getenv("POLL_INTERVAL", "300"))
@@ -453,7 +456,7 @@ def get_inbox_documents():
             documents.append({
                 "title": doc.get("title", "(ohne Titel)"),
                 "created": created,
-                "url": f"{PAPERLESS_URL}/documents/{doc.get('id')}/details",
+                "url": f"{PAPERLESS_PUBLIC_URL}/documents/{doc.get('id')}/details",
             })
         url = data.get("next")
     return documents

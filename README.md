@@ -84,7 +84,8 @@ Alle Einstellungen in `.env` – siehe `.env.example` für alle verfügbaren Var
 | `AZURE_CLIENT_SECRET` | Azure AD App Client Secret | – |
 | `AZURE_TENANT_ID` | Azure AD Tenant ID | – |
 | `USER_EMAIL` | Überwachte Outlook-E-Mail-Adresse | – |
-| `PAPERLESS_URL` | URL der Paperless-ngx Instanz | – |
+| `PAPERLESS_URL` | Interne URL der Paperless-ngx Instanz (für API-Zugriff) | – |
+| `PAPERLESS_PUBLIC_URL` | Öffentliche URL (Reverse Proxy) für Dokument-Links in der Zusammenfassung; leer = `PAPERLESS_URL` | – |
 | `PAPERLESS_TOKEN` | API-Token für Paperless-ngx | – |
 | `MAIL_FOLDER` | Name des zu überwachenden Outlook-Ordners | – |
 | `INBOX_TAG_ID` | Paperless Tag-ID für importierte Dokumente | `2` |

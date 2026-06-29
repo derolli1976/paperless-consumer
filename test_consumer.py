@@ -1027,7 +1027,7 @@ class TestGetInboxDocuments:
         mock_response.raise_for_status = MagicMock()
 
         with patch("requests.get", return_value=mock_response):
-            with patch.object(consumer, "PAPERLESS_URL", "http://pl"):
+            with patch.object(consumer, "PAPERLESS_PUBLIC_URL", "http://pl"):
                 docs = consumer.get_inbox_documents()
 
         assert len(docs) == 1

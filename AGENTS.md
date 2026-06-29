@@ -58,6 +58,7 @@ AZURE_CLIENT_SECRET=<your-secret>
 AZURE_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 USER_EMAIL=user@example.com
 PAPERLESS_URL=http://localhost:8000
+PAPERLESS_PUBLIC_URL=https://paperless.example.com
 PAPERLESS_TOKEN=<your-paperless-token>
 MAIL_FOLDER=<your-mail-folder>
 INBOX_TAG_ID=2
@@ -72,6 +73,7 @@ IMPORT_LOG_FILE=/app/data/import.log
 | Variable | Beschreibung | Default |
 |---|---|---|
 | `UPLOAD_RETRIES` | Anzahl zusätzlicher Versuche bei transienten Paperless-Fehlern (z.B. OOM-getöteter OCR-Worker / `SIGKILL`) | `3` |
+| `PAPERLESS_PUBLIC_URL` | Öffentliche Basis-URL (Reverse Proxy) für Dokument-Links in der Zusammenfassung; leer = `PAPERLESS_URL` | – |
 | `RETRY_DELAY` | Wartezeit zwischen Wiederholungsversuchen in Sekunden | `10` |
 | `SUMMARY_HOUR` | Uhrzeit (Stunde, 0–23, Europe/Berlin) für den täglichen E-Mail-Versand | `9` |
 | `SUMMARY_RECIPIENT` | Empfänger der Zusammenfassung (leer = `USER_EMAIL`) | – |
@@ -201,4 +203,4 @@ ssh user@<VM-HOST> "cd /opt/paperless-consumer && git pull && docker compose up 
 - Die tägliche Zusammenfassung wird einmal pro Tag versendet. Der Versand-Status wird als `summary_sent`-Sentinel in der Log-Datei persistiert und überlebt damit auch Neustarts des Dienstes.
 - Das Import-Log (`import.log`) verwendet JSON-Lines-Format: pro Zeile ein JSON-Objekt mit `type`, `ts`, `file`, `subject`, `status` (`success`/`failed`), `error`.
 - `_read_log_entries_since_last_summary()` liest alle Import-Einträge nach dem letzten `summary_sent`-Sentinel, unabhängig vom Datum. Damit werden auch Importe erfasst, die nach dem letzten Versand am Vortag noch eingegangen sind.
-- Die Zusammenfassung enthält eine Sektion mit allen Paperless-Dokumenten, die noch den INBOX-Tag (`INBOX_TAG_ID`) tragen. `get_inbox_documents()` ruft diese über `/api/documents/?tags__id__all={INBOX_TAG_ID}` ab, folgt der Paginierung und verlinkt jedes Dokument. Fehler beim Abruf blockieren den Versand der Zusammenfassung nicht.
+- Die Zusammenfassung enthält eine Sektion mit allen Paperless-Dokumenten, die noch den INBOX-Tag (`INBOX_TAG_ID`) tragen. `get_inbox_documents()` ruft diese über `/api/documents/?tags__id__all={INBOX_TAG_ID}` ab, folgt der Paginierung und verlinkt jedes Dokument. Die Links nutzen `PAPERLESS_PUBLIC_URL` (Reverse-Proxy-Adresse), während der API-Zugriff weiterhin über `PAPERLESS_URL` läuft. Fehler beim Abruf blockieren den Versand der Zusammenfassung nicht.
