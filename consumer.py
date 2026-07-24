@@ -224,7 +224,15 @@ def wait_for_task(task_id):
             headers=headers,
         )
         r.raise_for_status()
-        tasks = r.json()
+        payload = r.json()
+
+        # Paperless API v10 (paperless-ngx 3.0+) returns a paginated object
+        # {"count", "next", "previous", "results": [...]} for /api/tasks/,
+        # while API v9 and earlier return a plain list. Support both formats.
+        if isinstance(payload, dict):
+            tasks = payload.get("results", [])
+        else:
+            tasks = payload
 
         if not tasks:
             time.sleep(TASK_INTERVAL)

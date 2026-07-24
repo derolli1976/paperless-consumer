@@ -364,6 +364,59 @@ class TestWaitForTask:
         assert success is False
         assert error is not None
 
+    def test_paginierte_antwort_v10_erfolg(self):
+        """Handles the paginated /api/tasks/ response of paperless-ngx 3.0+ (API v10)."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "count": 1,
+            "next": None,
+            "previous": None,
+            "results": [{"status": "SUCCESS", "result": "ok"}],
+        }
+
+        with patch("requests.get", return_value=mock_response):
+            with patch("time.sleep"):
+                success, error = consumer.wait_for_task("task-v10")
+
+        assert success is True
+        assert error is None
+
+    def test_paginierte_antwort_v10_failure(self):
+        """Returns the failure reason from a paginated (API v10) FAILURE response."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "count": 1,
+            "next": None,
+            "previous": None,
+            "results": [{"status": "FAILURE", "result": "duplicate document found"}],
+        }
+
+        with patch("requests.get", return_value=mock_response):
+            with patch("time.sleep"):
+                success, error = consumer.wait_for_task("task-v10-fail")
+
+        assert success is False
+        assert "duplicate" in error
+
+    def test_paginierte_leere_ergebnisse_werden_erneut_versucht(self):
+        """Retries when a paginated response has an empty 'results' list."""
+        empty_response = MagicMock()
+        empty_response.json.return_value = {
+            "count": 0,
+            "next": None,
+            "previous": None,
+            "results": [],
+        }
+
+        success_response = MagicMock()
+        success_response.json.return_value = {"results": [{"status": "SUCCESS"}]}
+
+        with patch("requests.get", side_effect=[empty_response, success_response]):
+            with patch("time.sleep"):
+                success, _ = consumer.wait_for_task("task-v10-empty")
+
+        assert success is True
+
 
 # ---------------------------------------------------------------------------
 # _is_retryable_error
