@@ -417,6 +417,35 @@ class TestWaitForTask:
 
         assert success is True
 
+    def test_kleingeschriebener_status_v10_erfolg(self):
+        """Handles lowercase status values ('success') introduced in API v10."""
+        started_response = MagicMock()
+        started_response.json.return_value = {"results": [{"status": "started"}]}
+
+        success_response = MagicMock()
+        success_response.json.return_value = {"results": [{"status": "success"}]}
+
+        with patch("requests.get", side_effect=[started_response, success_response]):
+            with patch("time.sleep"):
+                success, error = consumer.wait_for_task("task-v10-lower")
+
+        assert success is True
+        assert error is None
+
+    def test_kleingeschriebener_status_v10_failure(self):
+        """Handles lowercase 'failure' status values introduced in API v10."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [{"status": "failure", "result": "duplicate document found"}]
+        }
+
+        with patch("requests.get", return_value=mock_response):
+            with patch("time.sleep"):
+                success, error = consumer.wait_for_task("task-v10-lower-fail")
+
+        assert success is False
+        assert "duplicate" in error
+
 
 # ---------------------------------------------------------------------------
 # _is_retryable_error

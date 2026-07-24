@@ -240,7 +240,10 @@ def wait_for_task(task_id):
             continue
 
         task = tasks[0]
-        status = task.get("status", "")
+        # Paperless API v10 (paperless-ngx 3.0+) reports status values in
+        # lowercase (e.g. "success", "started"), while API v9 used uppercase
+        # (e.g. "SUCCESS"). Normalize to uppercase for a version-agnostic check.
+        status = str(task.get("status", "")).upper()
 
         if status == "SUCCESS":
             return True, None
